@@ -1,0 +1,380 @@
+python -m venv env
+env\scripts\activate.bat
+pip install Django
+pip freeze
+django-admin startproject external
+cd external
+python manage.py startapp exam
+pip install djangorestframework
+python manage.py makemigration
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+.............................................................................................
+import os 
+'exam',
+'rest_framework',
+os.path.join(BASE_DIR,'templates')
+path('',include('exam.urls')),
+.......................................................................................
+models.py
+........................................
+from django.db import models
+
+#  Course Model
+class Course(models.Model):
+    name = models.CharField(max_length=100)
+    duration = models.IntegerField()
+
+    def __str__(self):
+        return self.name
+
+
+#  Skill Model (for multi checkbox)
+class Skill(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
+
+#  Student Model
+class Student(models.Model):
+
+    # basic fields
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    date_of_birth = models.DateField()
+
+    # file upload
+    profile = models.FileField(upload_to='students/', null=True, blank=True)
+
+    # dropdown
+    COURSE_TYPE = [
+        ('Regular', 'Regular'),
+        ('Online', 'Online')
+    ]
+    course_type = models.CharField(max_length=20, choices=COURSE_TYPE, blank=False)
+
+    # radio button
+    GENDER = [
+        ('Male', 'Male'),
+        ('Female', 'Female')
+    ]
+    gender = models.CharField(max_length=10, choices=GENDER, blank=False)
+
+    # checkbox
+    is_active = models.BooleanField(default=True)
+
+    # multi checkbox
+    skills = models.ManyToManyField(Skill)
+
+    # foreign key (dropdown)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, blank=False)
+
+    # number
+    marks = models.IntegerField()
+
+    def __str__(self):
+        return self.name
+..........................................................................................
+urls.py
+....................................................
+from django.urls import path
+from . import views
+
+urlpatterns = [
+
+    #  VIEW ALL
+    path('', views.view_student, name='view_student'),
+
+    #  ADD
+    path('add/', views.add_student, name='add_student'),
+
+    #  EDIT
+    path('edit/<int:id>/', views.edit_student, name='edit_student'),
+
+    #  DELETE
+    path('delete/<int:id>/', views.delete_student, name='delete_student'),
+
+    path('api/get/', views.get_students),
+    path('api/add/', views.add_student_api),
+]
+....................................................................................
+admin.py
+..........................
+from django.contrib import admin
+from .models import Student, Course, Skill
+
+# register models
+admin.site.register(Student)
+admin.site.register(Course)
+admin.site.register(Skill)
+...................................................................
+forms.py
+....................
+from django import forms
+from .models import Student
+
+class StudentForm(forms.ModelForm):
+    class Meta:
+        model = Student
+        fields = '__all__'
+
+        widgets = {
+            'date_of_birth': forms.DateInput(attrs={'type': 'date'}),
+            'gender': forms.RadioSelect(),
+            'skills': forms.CheckboxSelectMultiple(),
+        }
+................................................................
+serializers.py
+.................................
+from rest_framework import serializers
+from .models import Student
+
+class StudentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Student
+        fields = '__all__'
+..........................................................
+view.py
+.......................
+from django.shortcuts import render, redirect
+from .models import Student
+from .forms import StudentForm
+
+
+#  VIEW ALL STUDENTS (READ)
+def view_student(request):
+    data = Student.objects.all()
+    return render(request, 'view.html', {'data': data})
+
+
+# ADD STUDENT (CREATE)
+def add_student(request):
+    if request.method == "POST":
+        form = StudentForm(request.POST, request.FILES)
+
+        if form.is_valid():
+            form.save()
+            return redirect('view_student')
+    else:
+        form = StudentForm()
+
+    return render(request, 'add.html', {'form': form})
+
+
+#  EDIT STUDENT (UPDATE)
+def edit_student(request, id):
+    obj = Student.objects.get(id=id)
+
+    if request.method == "POST":
+        form = StudentForm(request.POST, request.FILES, instance=obj)
+
+        if form.is_valid():
+            form.save()
+            return redirect('view_student')
+    else:
+        form = StudentForm(instance=obj)
+
+    return render(request, 'add.html', {'form': form})
+
+
+#  DELETE STUDENT
+def delete_student(request, id):
+    obj = Student.objects.get(id=id)
+    obj.delete()
+    return redirect('view_student')
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Student
+from .serializers import StudentSerializer
+
+@api_view(['GET'])
+def get_students(request):
+    data = Student.objects.all()
+    serializer = StudentSerializer(data, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+def add_student_api(request):
+    serializer = StudentSerializer(data=request.data)
+
+    if serializer.is_valid():
+        serializer.save()
+
+    return Response(serializer.data)
+...............................................................................
+class base
+............
+views.py
+........................
+from django.views.generic import ListView, CreateView, UpdateView, DeleteView
+from django.urls import reverse_lazy
+from .models import Student
+
+
+#  LIST VIEW (READ)
+class StudentListView(ListView):
+    model = Student
+    template_name = 'view.html'
+    context_object_name = 'data'
+
+
+#  CREATE VIEW (ADD)
+class StudentCreateView(CreateView):
+    model = Student
+    fields = '__all__'
+    template_name = 'add.html'
+    success_url = reverse_lazy('view_student')
+
+
+#  UPDATE VIEW (EDIT)
+class StudentUpdateView(UpdateView):
+    model = Student
+    fields = '__all__'
+    template_name = 'add.html'
+    success_url = reverse_lazy('view_student')
+
+
+#  DELETE VIEW
+class StudentDeleteView(DeleteView):
+    model = Student
+    template_name = 'delete.html'
+    success_url = reverse_lazy('view_student')
+.............................................................................
+url.py
+.................
+from django.urls import path
+from .views import StudentListView, StudentCreateView, StudentUpdateView, StudentDeleteView
+
+urlpatterns = [
+    path('', StudentListView.as_view(), name='view_student'),
+    path('add/', StudentCreateView.as_view(), name='add_student'),
+    path('edit/<int:pk>/', StudentUpdateView.as_view(), name='edit_student'),
+    path('delete/<int:pk>/', StudentDeleteView.as_view(), name='delete_student'),
+]
+....................................................................
+delete.html
+...............
+<h2>Are you sure you want to delete?</h2>
+
+<form method="post">
+    {% csrf_token %}
+    <button type="submit">Yes Delete</button>
+</form>
+......................................................
+add.html
+...............
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Student</title>
+</head>
+<body>
+
+<h2>Add / Edit Student</h2>
+
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <!-- TEXTBOX -->
+    <p>Name: {{ form.name }}</p>
+
+    <!-- EMAIL -->
+    <p>Email: {{ form.email }}</p>
+
+    <!-- DATE -->
+    <p>DOB: {{ form.date_of_birth }}</p>
+
+    <!-- FILE -->
+    <p>Profile: {{ form.profile }}</p>
+
+    <!-- DROPDOWN -->
+    <p>Course Type: {{ form.course_type }}</p>
+
+    <!-- RADIO -->
+    <p>Gender: {{ form.gender }}</p>
+
+    <!-- CHECKBOX -->
+    <p>Active: {{ form.is_active }}</p>
+
+    <!-- MULTI CHECKBOX -->
+    <p>Skills: {{ form.skills }}</p>
+
+    <!-- FOREIGN KEY -->
+    <p>Course: {{ form.course }}</p>
+
+    <!-- NUMBER -->
+    <p>Marks: {{ form.marks }}</p>
+
+    <button type="submit">Submit</button>
+
+</form>
+
+</body>
+</html>
+..........................................................
+view.html
+
+............
+<!DOCTYPE html>
+<html>
+<head>
+    <title>View Students</title>
+</head>
+<body>
+
+<h2>Student List</h2>
+
+<a href="/add/">Add Student</a>
+
+<table border="1">
+<tr>
+<th>Name</th>
+<th>Email</th>
+<th>Course</th>
+<th>Status</th>
+<th>Result</th>
+<th>Action</th>
+</tr>
+
+{% for s in data %}
+<tr>
+
+<td>{{ s.name }}</td>
+<td>{{ s.email }}</td>
+<td>{{ s.course.name }}</td>
+
+<!-- CHECKBOX LOGIC -->
+<td>
+{% if s.is_active %}
+Active
+{% else %}
+Inactive
+{% endif %}
+</td>
+
+<!--  MARKS LOGIC -->
+<td>
+{% if s.marks >= 40 %}
+Pass
+{% else %}
+Fail
+{% endif %}
+</td>
+
+<td>
+<a href="/edit/{{ s.id }}">Edit</a>
+<a href="/delete/{{ s.id }}">Delete</a>
+</td>
+
+</tr>
+{% endfor %}
+
+</table>
+
+</body>
+</html>
